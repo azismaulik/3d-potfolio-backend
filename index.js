@@ -93,34 +93,37 @@ app.post("/post", uploadMiddleware.single("file"), async (req, res) => {
   });
 });
 
-app.put("/post", uploadMiddleware.single("file"), async (req, res) => {
-  let newPath = null;
-  if (req.file) {
-    const { originalname, path } = req.file;
-    const parts = originalname.split(".");
-    const ext = parts[parts.length - 1];
-    const newPath = path + "." + ext;
-    fs.renameSync(path, newPath);
-  }
+app.put("/post/:id", uploadMiddleware.single("file"), async (req, res) => {
+  const { id } = req.params;
 
   const { token } = req.cookies;
-  jwt.verify(token, secret, {}, async (err, info) => {
-    if (err) throw err;
-    const { id, title, summary, content } = req.body;
+  try {
+    const info = jwt.verify(token, secret);
     const postDoc = await Post.findById(id);
 
-    const isAuthor = JSON.stringify(postDoc.author) === JSON.stringify(info.id);
+    const isAuthor = postDoc.author.equals(info.id);
     if (!isAuthor) {
       return res.status(400).json("You are not the author");
     }
-    await postDoc.update({
-      title,
-      summary,
-      content,
-      cover: newPath ? newPath : postDoc?.cover,
-    });
+
+    const { title, summary, content } = req.body;
+    postDoc.title = title;
+    postDoc.summary = summary;
+    postDoc.content = content;
+    if (req.file) {
+      const { originalname } = req.file;
+      const parts = originalname.split(".");
+      const ext = parts[parts.length - 1];
+      const newPath = req.file.path + "." + ext;
+      fs.renameSync(req.file.path, newPath);
+      postDoc.cover = newPath;
+    }
+    await postDoc.save();
     res.json(postDoc);
-  });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json("Server error");
+  }
 });
 
 app.get("/post", async (req, res) => {
@@ -130,6 +133,21 @@ app.get("/post", async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(20)
   );
+});
+
+app.delete("/post/:id", async (req, res) => {
+  const { id } = req.params;
+  const { token } = req.cookies;
+  jwt.verify(token, secret, {}, async (err, info) => {
+    if (err) throw err;
+    const postDoc = await Post.findById(id);
+    const isAuthor = JSON.stringify(postDoc.author) === JSON.stringify(info.id);
+    if (!isAuthor) {
+      return res.status(400).json("You are not the author");
+    }
+    await postDoc.remove();
+    res.json(postDoc);
+  });
 });
 
 app.get("/post/:id", async (req, res) => {
