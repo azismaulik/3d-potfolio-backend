@@ -81,11 +81,14 @@ app.post("/post", uploadMiddleware.single("file"), async (req, res) => {
   const { token } = req.cookies;
   jwt.verify(token, secret, {}, async (err, info) => {
     if (err) throw err;
-    const { title, summary, content } = req.body;
+    const { title, summary, content, category } = req.body;
+
+    const categories = JSON.parse(category);
     const postDoc = await Post.create({
       title,
       summary,
       content,
+      categories,
       cover: newPath,
       author: info.id,
     });
@@ -106,10 +109,14 @@ app.put("/post/:id", uploadMiddleware.single("file"), async (req, res) => {
       return res.status(400).json("You are not the author");
     }
 
-    const { title, summary, content } = req.body;
+    const { title, summary, content, category } = req.body;
+
+    const categories = JSON.parse(category);
+
     postDoc.title = title;
     postDoc.summary = summary;
     postDoc.content = content;
+    postDoc.categories = categories;
     if (req.file) {
       const { originalname } = req.file;
       const parts = originalname.split(".");
@@ -136,18 +143,28 @@ app.get("/post", async (req, res) => {
 });
 
 app.delete("/post/:id", async (req, res) => {
-  const { id } = req.params;
-  const { token } = req.cookies;
-  jwt.verify(token, secret, {}, async (err, info) => {
-    if (err) throw err;
-    const postDoc = await Post.findById(id);
-    const isAuthor = JSON.stringify(postDoc.author) === JSON.stringify(info.id);
-    if (!isAuthor) {
-      return res.status(400).json("You are not the author");
+  try {
+    const { id } = req.params;
+
+    // Cek apakah postingan dengan ID yang diberikan ada dalam database
+    const post = await Post.findById(id);
+    if (!post) {
+      return res.status(404).json({ message: "Postingan tidak ditemukan" });
     }
-    await postDoc.remove();
-    res.json(postDoc);
-  });
+
+    // Lakukan pengecekan otorisasi, misalnya hanya pengguna tertentu yang dapat menghapus postingan
+    // ...
+
+    // Hapus postingan dari database
+    await Post.deleteOne({ _id: id });
+
+    res.json({ message: "Postingan berhasil dihapus" });
+  } catch (error) {
+    console.error("Terjadi kesalahan saat menghapus postingan:", error);
+    res
+      .status(500)
+      .json({ message: "Terjadi kesalahan saat menghapus postingan" });
+  }
 });
 
 app.get("/post/:id", async (req, res) => {
