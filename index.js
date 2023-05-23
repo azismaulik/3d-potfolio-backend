@@ -3,6 +3,7 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const User = require("./models/User");
 const Post = require("./models/Post");
+const Project = require("./models/Project");
 const bcrypt = require("bcryptjs");
 const app = express();
 const jwt = require("jsonwebtoken");
@@ -32,7 +33,6 @@ app.post("/register", async (req, res) => {
     });
     res.json(userDoc);
   } catch (e) {
-    console.log(e);
     res.status(400).json(e);
   }
 });
@@ -171,6 +171,89 @@ app.get("/post/:id", async (req, res) => {
   const { id } = req.params;
   const postDoc = await Post.findById(id).populate("author", ["username"]);
   res.json(postDoc);
+});
+
+// project
+app.post("/project", uploadMiddleware.single("file"), async (req, res) => {
+  const { originalname, path } = req.file;
+  const parts = originalname.split(".");
+  const ext = parts[parts.length - 1];
+  const newPath = path + "." + ext;
+  fs.renameSync(path, newPath);
+
+  const { token } = req.cookies;
+  jwt.verify(token, secret, {}, async (err, info) => {
+    if (err) throw err;
+    const { title, description, tag } = req.body;
+
+    const tags = JSON.parse(tag);
+    const projectDoc = await Project.create({
+      title,
+      description,
+      image: newPath,
+      tag: tags,
+      author: info.id,
+    });
+    res.json(projectDoc);
+  });
+});
+
+app.put("/project/:id", uploadMiddleware.single("file"), async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const projectDoc = await Project.findById(id);
+    const { title, description, tag } = req.body;
+
+    const tags = JSON.parse(tag);
+
+    projectDoc.title = title;
+    projectDoc.description = description;
+    projectDoc.tag = tags;
+    if (req.file) {
+      const { originalname } = req.file;
+      const parts = originalname.split(".");
+      const ext = parts[parts.length - 1];
+      const newPath = req.file.path + "." + ext;
+      fs.renameSync(req.file.path, newPath);
+      projectDoc.image = newPath;
+    }
+    await projectDoc.save();
+    res.json(projectDoc);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json("Server error");
+  }
+});
+
+app.get("/project", async (req, res) => {
+  res.json(await Project.find().sort({ createdAt: -1 }).limit(20));
+});
+
+app.get("/project/:id", async (req, res) => {
+  const { id } = req.params;
+  const projectDoc = await Project.findById(id);
+  res.json(projectDoc);
+});
+
+app.delete("/project/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Cek apakah postingan dengan ID yang diberikan ada dalam database
+    const project = await Project.findById(id);
+    if (!project) {
+      return res.status(404).json({ message: "Postingan tidak ditemukan" });
+    }
+    // Hapus postingan dari database
+    await Project.deleteOne({ _id: id });
+
+    res.json({ message: "Postingan berhasil dihapus" });
+  } catch (error) {
+    console.error("Terjadi kesalahan saat menghapus postingan:", error);
+    res
+      .status(500)
+      .json({ message: "Terjadi kesalahan saat menghapus postingan" });
+  }
 });
 
 app.listen(5000);
