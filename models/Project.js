@@ -6,6 +6,7 @@ const ProjectSchema = new Schema(
     title: String,
     description: String,
     image: String,
+    link: String,
     tag: { type: [String] },
   },
   {

@@ -184,12 +184,13 @@ app.post("/project", uploadMiddleware.single("file"), async (req, res) => {
   const { token } = req.cookies;
   jwt.verify(token, secret, {}, async (err, info) => {
     if (err) throw err;
-    const { title, description, tag } = req.body;
+    const { title, description, tag, link } = req.body;
 
     const tags = JSON.parse(tag);
     const projectDoc = await Project.create({
       title,
       description,
+      link,
       image: newPath,
       tag: tags,
       author: info.id,
@@ -203,12 +204,13 @@ app.put("/project/:id", uploadMiddleware.single("file"), async (req, res) => {
 
   try {
     const projectDoc = await Project.findById(id);
-    const { title, description, tag } = req.body;
+    const { title, description, tag, link } = req.body;
 
     const tags = JSON.parse(tag);
 
     projectDoc.title = title;
     projectDoc.description = description;
+    projectDoc.link = link;
     projectDoc.tag = tags;
     if (req.file) {
       const { originalname } = req.file;
