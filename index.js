@@ -10,7 +10,7 @@ const app = express();
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 const multer = require("multer");
-const uploadMiddleware = multer({ dest: "uploads/" });
+const uploadMiddleware = multer({ dest: "tmp/" });
 const fs = require("fs");
 require("dotenv").config();
 
@@ -37,7 +37,7 @@ cloudinary.config({
 
 app.get("/", async (req, res) => {
   res.status(200).json({
-    message: "Hello from Azis Open AI API!",
+    message: "Hello from Azis Portfolio API!",
   });
 });
 
