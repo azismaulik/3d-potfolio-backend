@@ -8,7 +8,6 @@ const PostSchema = new Schema(
     content: String,
     cover: String,
     categories: { type: [String] },
-    author: { type: Schema.Types.ObjectId, ref: "User" },
   },
   {
     timestamps: true,

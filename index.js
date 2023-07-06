@@ -1,3 +1,4 @@
+const cloudinary = require("cloudinary").v2;
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
@@ -11,20 +12,30 @@ const cookieParser = require("cookie-parser");
 const multer = require("multer");
 const uploadMiddleware = multer({ dest: "uploads/" });
 const fs = require("fs");
+require("dotenv").config();
 
 const salt = bcrypt.genSaltSync(10);
-const secret = "asdalkjsfkalnvasnvaklfhfhaklhkanlnanlisdfsdoiowqrasf";
+const secret = process.env.SECRET;
 
-app.use(cors({ credentials: true, origin: "http://localhost:5173" }));
+app.use(
+  cors({
+    credentials: true,
+    origin: ["http://localhost:5173", "http://localhost:3000"],
+  })
+);
 app.use(express.json());
 app.use(cookieParser());
 app.use("/uploads", express.static(__dirname + "/uploads"));
 
-mongoose.connect(
-  "mongodb+srv://azis:5lV1D4hBcBkQvc2e@cluster0.05efqtu.mongodb.net/"
-);
+mongoose.connect(process.env.MONGODB_URL);
 
-app.post("/register", async (req, res) => {
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+app.post("/api/v1/register", async (req, res) => {
   const { username, password } = req.body;
   try {
     const userDoc = await User.create({
@@ -37,7 +48,7 @@ app.post("/register", async (req, res) => {
   }
 });
 
-app.post("/login", async (req, res) => {
+app.post("/api/v1/login", async (req, res) => {
   const { username, password } = req.body;
   const userDoc = await User.findOne({ username });
   const passOk = userDoc
@@ -59,7 +70,7 @@ app.post("/login", async (req, res) => {
   }
 });
 
-app.get("/profile", (req, res) => {
+app.get("/api/v1/profile", (req, res) => {
   const { token } = req.cookies;
   jwt.verify(token, secret, {}, (err, info) => {
     if (err) throw err;
@@ -67,21 +78,17 @@ app.get("/profile", (req, res) => {
   });
 });
 
-app.post("/logout", (req, res) => {
+app.post("/api/v1/logout", (req, res) => {
   res.cookie("token", "").json("ok");
 });
 
-app.post("/post", uploadMiddleware.single("file"), async (req, res) => {
-  const { originalname, path } = req.file;
-  const parts = originalname.split(".");
-  const ext = parts[parts.length - 1];
-  const newPath = path + "." + ext;
-  fs.renameSync(path, newPath);
-
+app.post("/api/v1/post", uploadMiddleware.single("file"), async (req, res) => {
   const { token } = req.cookies;
   jwt.verify(token, secret, {}, async (err, info) => {
     if (err) throw err;
     const { title, summary, content, category } = req.body;
+    const file = req.file;
+    const photoUrl = await cloudinary.uploader.upload(file.path);
 
     const categories = JSON.parse(category);
     const postDoc = await Post.create({
@@ -89,71 +96,58 @@ app.post("/post", uploadMiddleware.single("file"), async (req, res) => {
       summary,
       content,
       categories,
-      cover: newPath,
-      author: info.id,
+      cover: photoUrl.secure_url,
     });
+
+    // Menghapus file yang diunggah
+    fs.unlinkSync(file.path);
     res.json(postDoc);
   });
 });
 
-app.put("/post/:id", uploadMiddleware.single("file"), async (req, res) => {
-  const { id } = req.params;
+app.put(
+  "/api/v1/post/:id",
+  uploadMiddleware.single("file"),
+  async (req, res) => {
+    const { id } = req.params;
+    const { token } = req.cookies;
+    try {
+      const postDoc = await Post.findById(id);
+      const { title, summary, content, category } = req.body;
+      const categories = JSON.parse(category);
 
-  const { token } = req.cookies;
-  try {
-    const info = jwt.verify(token, secret);
-    const postDoc = await Post.findById(id);
+      postDoc.title = title;
+      postDoc.summary = summary;
+      postDoc.content = content;
+      postDoc.categories = categories;
 
-    const isAuthor = postDoc.author.equals(info.id);
-    if (!isAuthor) {
-      return res.status(400).json("You are not the author");
+      if (req.file) {
+        const photoUrl = await cloudinary.uploader.upload(req.file.path);
+        postDoc.cover = photoUrl.secure_url;
+        fs.unlinkSync(req.file.path); // Menghapus file setelah diunggah ke Cloudinary
+      }
+
+      await postDoc.save();
+      res.json(postDoc);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json("Server error");
     }
-
-    const { title, summary, content, category } = req.body;
-
-    const categories = JSON.parse(category);
-
-    postDoc.title = title;
-    postDoc.summary = summary;
-    postDoc.content = content;
-    postDoc.categories = categories;
-    if (req.file) {
-      const { originalname } = req.file;
-      const parts = originalname.split(".");
-      const ext = parts[parts.length - 1];
-      const newPath = req.file.path + "." + ext;
-      fs.renameSync(req.file.path, newPath);
-      postDoc.cover = newPath;
-    }
-    await postDoc.save();
-    res.json(postDoc);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json("Server error");
   }
+);
+
+app.get("/api/v1/post", async (req, res) => {
+  res.json(await Post.find().sort({ createdAt: -1 }).limit(20));
 });
 
-app.get("/post", async (req, res) => {
-  res.json(
-    await Post.find()
-      .populate("author", ["username"])
-      .sort({ createdAt: -1 })
-      .limit(20)
-  );
-});
-
-app.delete("/post/:id", async (req, res) => {
+app.delete("/api/v1/post/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
     // Cek apakah postingan dengan ID yang diberikan ada dalam database
     const post = await Post.findById(id);
     if (!post) {
       return res.status(404).json({ message: "Postingan tidak ditemukan" });
     }
-
-    // Lakukan pengecekan otorisasi, misalnya hanya pengguna tertentu yang dapat menghapus postingan
-    // ...
 
     // Hapus postingan dari database
     await Post.deleteOne({ _id: id });
@@ -167,78 +161,89 @@ app.delete("/post/:id", async (req, res) => {
   }
 });
 
-app.get("/post/:id", async (req, res) => {
+app.get("/api/v1/post/:id", async (req, res) => {
   const { id } = req.params;
-  const postDoc = await Post.findById(id).populate("author", ["username"]);
+  const postDoc = await Post.findById(id);
   res.json(postDoc);
 });
 
 // project
-app.post("/project", uploadMiddleware.single("file"), async (req, res) => {
-  const { originalname, path } = req.file;
-  const parts = originalname.split(".");
-  const ext = parts[parts.length - 1];
-  const newPath = path + "." + ext;
-  fs.renameSync(path, newPath);
+app.post(
+  "/api/v1/project",
+  uploadMiddleware.single("file"),
+  async (req, res) => {
+    const { token } = req.cookies;
+    jwt.verify(token, secret, {}, async (err, info) => {
+      if (err) throw err;
 
-  const { token } = req.cookies;
-  jwt.verify(token, secret, {}, async (err, info) => {
-    if (err) throw err;
-    const { title, description, tag, link } = req.body;
+      const { title, description, tag, link } = req.body;
 
-    const tags = JSON.parse(tag);
-    const projectDoc = await Project.create({
-      title,
-      description,
-      link,
-      image: newPath,
-      tag: tags,
-      author: info.id,
+      try {
+        const photoUrl = await cloudinary.uploader.upload(req.file.path);
+        const tags = JSON.parse(tag);
+
+        const projectDoc = await Project.create({
+          title,
+          description,
+          link,
+          image: photoUrl.secure_url,
+          tag: tags,
+        });
+
+        fs.unlinkSync(req.file.path); // Menghapus file setelah diunggah ke Cloudinary
+
+        res.json(projectDoc);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json("Server error");
+      }
     });
-    res.json(projectDoc);
-  });
-});
-
-app.put("/project/:id", uploadMiddleware.single("file"), async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const projectDoc = await Project.findById(id);
-    const { title, description, tag, link } = req.body;
-
-    const tags = JSON.parse(tag);
-
-    projectDoc.title = title;
-    projectDoc.description = description;
-    projectDoc.link = link;
-    projectDoc.tag = tags;
-    if (req.file) {
-      const { originalname } = req.file;
-      const parts = originalname.split(".");
-      const ext = parts[parts.length - 1];
-      const newPath = req.file.path + "." + ext;
-      fs.renameSync(req.file.path, newPath);
-      projectDoc.image = newPath;
-    }
-    await projectDoc.save();
-    res.json(projectDoc);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json("Server error");
   }
-});
+);
 
-app.get("/project", async (req, res) => {
+app.put(
+  "/api/v1/project/:id",
+  uploadMiddleware.single("file"),
+  async (req, res) => {
+    const { id } = req.params;
+
+    try {
+      const projectDoc = await Project.findById(id);
+      const { title, description, tag, link } = req.body;
+
+      const tags = JSON.parse(tag);
+
+      projectDoc.title = title;
+      projectDoc.description = description;
+      projectDoc.link = link;
+      projectDoc.tag = tags;
+
+      if (req.file) {
+        const photoUrl = await cloudinary.uploader.upload(req.file.path);
+        projectDoc.image = photoUrl.secure_url;
+        fs.unlinkSync(req.file.path); // Menghapus file setelah diunggah ke Cloudinary
+      }
+
+      await projectDoc.save();
+      res.json(projectDoc);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json("Server error");
+    }
+  }
+);
+
+app.get("/api/v1/project", async (req, res) => {
   res.json(await Project.find().sort({ createdAt: -1 }).limit(20));
 });
 
-app.get("/project/:id", async (req, res) => {
+app.get("/api/v1/project/:id", async (req, res) => {
   const { id } = req.params;
   const projectDoc = await Project.findById(id);
   res.json(projectDoc);
 });
 
-app.delete("/project/:id", async (req, res) => {
+app.delete("/api/v1/project/:id", async (req, res) => {
   try {
     const { id } = req.params;
     // Cek apakah postingan dengan ID yang diberikan ada dalam database
