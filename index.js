@@ -35,6 +35,12 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+app.get("/", async (req, res) => {
+  res.status(200).json({
+    message: "Hello from Azis Open AI API!",
+  });
+});
+
 app.post("/api/v1/register", async (req, res) => {
   const { username, password } = req.body;
   try {
